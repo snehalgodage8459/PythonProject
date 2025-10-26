@@ -1,0 +1,238 @@
+"""
+Automatic Hostel Room Allotment System - Compact Version
+"""
+
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+import json
+import os
+from datetime import datetime
+
+DATA_FILE = "hostel_data.json"
+
+# -------------------- Models --------------------
+class Room:
+    def _init_(self, number, capacity, floor, rtype="Standard"):
+        self.number = number
+        self.capacity = capacity
+        self.floor = floor
+        self.type = rtype
+        self.occupied = 0
+        self.students = []
+
+    def is_available(self):
+        return self.occupied < self.capacity
+
+    def add_student(self, sid):
+        if self.is_available():
+            self.students.append(sid)
+            self.occupied += 1
+            return True
+        return False
+
+    def to_dict(self):
+        return self._dict_
+
+class Student:
+    def _init_(self, sid, name, gender, year):
+        self.sid = sid
+        self.name = name
+        self.gender = gender
+        self.year = year
+        self.room = None
+
+    def to_dict(self):
+        return self._dict_
+
+# -------------------- System --------------------
+class HostelSystem:
+    def _init_(self):
+        self.rooms = []
+        self.students = []
+        self.load_data()
+
+    # Add room/student
+    def add_room(self, number, capacity, floor, rtype):
+        self.rooms.append(Room(number, capacity, floor, rtype))
+        self.save_data()
+
+    def add_student(self, sid, name, gender, year):
+        self.students.append(Student(sid, name, gender, year))
+        self.save_data()
+
+    # Allocate rooms
+    def allocate_rooms(self):
+        results = ["="*50, "ROOM ALLOTMENT START", "="*50]
+        sorted_students = sorted(self.students, key=lambda s: s.year, reverse=True)
+        males = [s for s in sorted_students if s.gender.lower() == "male"]
+        females = [s for s in sorted_students if s.gender.lower() == "female"]
+        for gender_list in [males, females]:
+            for s in gender_list:
+                allocated = False
+                for r in self.rooms:
+                    if r.is_available() and (len(r.students) == 0 or any(self.get_student_by_id(sid).year == s.year for sid in r.students)):
+                        if r.add_student(s.sid):
+                            s.room = r.number
+                            results.append(f"✓ {s.name} → Room {r.number}")
+                            allocated = True
+                            break
+                if not allocated:
+                    for r in self.rooms:
+                        if r.is_available():
+                            if r.add_student(s.sid):
+                                s.room = r.number
+                                results.append(f"✓ {s.name} → Room {r.number}")
+                                allocated = True
+                                break
+                if not allocated:
+                    results.append(f"✗ No room for {s.name}")
+        results.append("="*50 + "\nALLOTMENT COMPLETED\n" + "="*50)
+        self.save_data()
+        return "\n".join(results)
+
+    def get_student_by_id(self, sid):
+        return next((s for s in self.students if s.sid == sid), None)
+
+    def get_report(self):
+        report = ["="*50, "HOSTEL REPORT", "="*50]
+        for r in self.rooms:
+            report.append(f"\nRoom {r.number} | Floor: {r.floor} | Type: {r.type} | Capacity: {r.capacity} | Occupied: {r.occupied}")
+            if r.students:
+                for sid in r.students:
+                    s = self.get_student_by_id(sid)
+                    report.append(f" - {s.name} (ID: {s.sid}, Year: {s.year})")
+            else:
+                report.append(" - [Empty]")
+        return "\n".join(report)
+
+    # Save/load
+    def save_data(self):
+        data = {
+            "rooms": [r.to_dict() for r in self.rooms],
+            "students": [s.to_dict() for s in self.students],
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        with open(DATA_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+
+    def load_data(self):
+        if not os.path.exists(DATA_FILE):
+            return
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
+        self.rooms = [Room(**r) for r in data.get("rooms", [])]
+        self.students = [Student(**s) for s in data.get("students", [])]
+
+# -------------------- GUI --------------------
+class HostelGUI:
+    def _init_(self, root):
+        self.root = root
+        self.root.title("Hostel Room Allotment")
+        self.root.geometry("850x650")
+        self.sys = HostelSystem()
+
+        self.tab = ttk.Notebook(root)
+        self.tab.pack(fill="both", expand=True)
+
+        self.create_room_tab()
+        self.create_student_tab()
+        self.create_allotment_tab()
+
+    # ---- Tabs ----
+    def create_room_tab(self):
+        frm = ttk.Frame(self.tab, padding=10)
+        self.tab.add(frm, text="Add Room")
+        ttk.Label(frm, text="Room Number:").grid(row=0, column=0, pady=5)
+        self.room_no = ttk.Entry(frm); self.room_no.grid(row=0, column=1, pady=5)
+        ttk.Label(frm, text="Capacity:").grid(row=1, column=0, pady=5)
+        self.room_cap = ttk.Entry(frm); self.room_cap.grid(row=1, column=1, pady=5)
+        ttk.Label(frm, text="Floor:").grid(row=2, column=0, pady=5)
+        self.room_floor = ttk.Entry(frm); self.room_floor.grid(row=2, column=1, pady=5)
+        ttk.Label(frm, text="Type:").grid(row=3, column=0, pady=5)
+        self.room_type = ttk.Combobox(frm, values=["Standard","Deluxe","AC"]); self.room_type.grid(row=3, column=1, pady=5)
+        ttk.Button(frm, text="Add Room", command=self.add_room).grid(row=4, column=0,columnspan=2, pady=10)
+        ttk.Label(frm, text="Rooms:").grid(row=5, column=0, columnspan=2)
+        self.room_list = tk.Listbox(frm, width=70); self.room_list.grid(row=6, column=0, columnspan=2, pady=5)
+        self.update_room_list()
+
+    def create_student_tab(self):
+        frm = ttk.Frame(self.tab, padding=10)
+        self.tab.add(frm, text="Add Student")
+        ttk.Label(frm, text="Student ID:").grid(row=0, column=0, pady=5)
+        self.st_id = ttk.Entry(frm); self.st_id.grid(row=0, column=1, pady=5)
+        ttk.Label(frm, text="Name:").grid(row=1, column=0, pady=5)
+        self.st_name = ttk.Entry(frm); self.st_name.grid(row=1, column=1, pady=5)
+        ttk.Label(frm, text="Gender:").grid(row=2, column=0, pady=5)
+        self.st_gender = ttk.Combobox(frm, values=["Male","Female"]); self.st_gender.grid(row=2, column=1, pady=5)
+        ttk.Label(frm, text="Year:").grid(row=3, column=0, pady=5)
+        self.st_year = ttk.Entry(frm); self.st_year.grid(row=3, column=1, pady=5)
+        ttk.Button(frm, text="Add Student", command=self.add_student).grid(row=4,column=0,columnspan=2,pady=10)
+        ttk.Label(frm, text="Students:").grid(row=5,column=0,columnspan=2)
+        self.student_list = tk.Listbox(frm, width=70); self.student_list.grid(row=6,column=0,columnspan=2,pady=5)
+        self.update_student_list()
+
+    def create_allotment_tab(self):
+        frm = ttk.Frame(self.tab, padding=10)
+        self.tab.add(frm, text="Allocate & Report")
+        ttk.Button(frm, text="Allocate Rooms", command=self.allocate_rooms).pack(pady=5)
+        ttk.Button(frm, text="Generate Report", command=self.generate_report).pack(pady=5)
+        self.report_text = scrolledtext.ScrolledText(frm, height=25, width=100); self.report_text.pack(pady=10)
+
+    # ---- Actions ----
+    def add_room(self):
+        try:
+            num = self.room_no.get().strip()
+            cap = int(self.room_cap.get().strip())
+            floor = int(self.room_floor.get().strip())
+            rtype = self.room_type.get()
+            if not num: raise ValueError
+            self.sys.add_room(num, cap, floor, rtype)
+            messagebox.showinfo("Success", f"Room {num} added.")
+            self.room_no.delete(0,"end"); self.room_cap.delete(0,"end"); self.room_floor.delete(0,"end")
+            self.update_room_list()
+        except:
+            messagebox.showerror("Error","Enter valid details!")
+
+    def add_student(self):
+        try:
+            sid = self.st_id.get().strip()
+            name = self.st_name.get().strip()
+            gender = self.st_gender.get()
+            year = int(self.st_year.get().strip())
+            if not sid or not name: raise ValueError
+            self.sys.add_student(sid, name, gender, year)
+            messagebox.showinfo("Success", f"Student {name} added.")
+            self.st_id.delete(0,"end"); self.st_name.delete(0,"end"); self.st_year.delete(0,"end")
+            self.update_student_list()
+        except:
+            messagebox.showerror("Error","Enter valid details!")
+
+    def allocate_rooms(self):
+        if not self.sys.rooms or not self.sys.students:
+            messagebox.showwarning("Warning","Add rooms and students first!")
+            return
+        result = self.sys.allocate_rooms()
+        self.report_text.delete(1.0,"end")
+        self.report_text.insert(1.0,result)
+        messagebox.showinfo("Success","Allocation completed!")
+
+    def generate_report(self):
+        report = self.sys.get_report()
+        self.report_text.delete(1.0,"end")
+        self.report_text.insert(1.0,report)
+
+    def update_room_list(self):
+        self.room_list.delete(0,"end")
+        for r in self.sys.rooms:
+            self.room_list.insert("end", f"{r.number} | Floor: {r.floor} | Type: {r.type} | Cap: {r.capacity} | Occ: {r.occupied}")
+
+    def update_student_list(self):
+        self.student_list.delete(0,"end")
+        for s in self.sys.students:
+            self.student_list.insert("end", f"{s.sid} | {s.name} | {s.gender} | Year: {s.year} | Room: {s.room or 'None'}")
+
+# -------------------- Run --------------------
+if _name_ == "_main_":
+    root = tk.Tk()
+    app = HostelGUI(root)
+    root.mainloop()
